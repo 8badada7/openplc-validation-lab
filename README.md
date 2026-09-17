@@ -4,18 +4,22 @@
 
 ## Current Status
 
-已建立基于 OpenPLC Runtime、Modbus/TCP、Python 和 pytest 的基础系统验证链路。
+已建立基于 OpenPLC Runtime、Modbus/TCP、Python 和 pytest 的系统验证基础链路。
 
 目前已完成：
 
 - 基于 Docker 的 OpenPLC Runtime v4.2.2 测试环境
-- PLC 编译、上传、运行与停止/启动基础验证
-- 项目级 Modbus/TCP Server 配置与服务监听验证
-- `%MW0` / `%MW1` 与 Holding Register `1024` / `1025` 的地址映射验证
+- PLC 编译、上传、运行与基础 smoke validation
+- Modbus/TCP Server 配置、监听与寄存器映射验证
 - Python + pymodbus 端到端读写验证
-- pytest 正常通信基线测试，当前测试结果：`2 passed`
+- pytest 正常通信 baseline 自动化测试
+- PLC Stop/Start 服务中断与自动恢复验证
+- 连续两轮 Stop/Start recovery stability 验证
+- 基于 Runtime HTTPS API + JWT 的 PLC 状态控制
 
-当前正在向连接中断与恢复、协议边界与异常请求、故障注入，以及真实 OpenPLC Issue 的复现与回归验证扩展。
+当前自动化测试结果：`4 passed`
+
+下一阶段将扩展协议边界、异常请求、故障注入，以及真实 OpenPLC Issue 的复现与回归验证。
 
 ## Validation Roadmap
 
