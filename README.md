@@ -16,10 +16,14 @@
 - PLC Stop/Start 服务中断与自动恢复验证
 - 连续两轮 Stop/Start recovery stability 验证
 - 基于 Runtime HTTPS API + JWT 的 PLC 状态控制
+- Modbus Holding Register mapped/unmapped 边界行为验证与自动化
+- 未注册 device_id 的异常响应与后续连接可用性验证
+- UINT 16-bit 数据边界与回绕行为验证
+- 适用测试场景中的 bounded polling 与状态恢复
 
-当前自动化测试结果：`4 passed`
+当前自动化测试结果：`8 passed`
 
-下一阶段将扩展协议边界、异常请求、故障注入，以及真实 OpenPLC Issue 的复现与回归验证。
+下一阶段将开展进一步的故障注入，并推进真实 OpenPLC Issue 的复现与回归验证，重点包括 Issue #691。
 
 ## Validation Roadmap
 
