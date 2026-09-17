@@ -6,3 +6,4 @@ logs/*.log
 reports/*.html
 reports/*.xml
 .env
+/plc_projects/runtime_smoke_test/build/
