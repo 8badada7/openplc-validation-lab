@@ -24,10 +24,12 @@
 - 可控 Python Modbus/TCP 远端设备模拟器
 - 远端通信中断后的 `set-to-zero` 行为验证
 - 远端服务恢复后的自动重连与数据恢复验证
+- 在隔离的 OpenPLC Runtime v4.1.9 环境中复现历史 stale-value 行为
+- OpenPLC Runtime v4.1.9 与 v4.2.2 的端到端回归对照
 
 当前自动化测试结果：`9 passed`
 
-当前 Remote Device 回归覆盖与 OpenPLC Issue #691 相关的修复后行为；尚未复现历史修复前缺陷。
+当前 Remote Device 回归已覆盖与 OpenPLC Issue #691 相关的历史 stale-value 行为和当前 fixed behavior。
 
 ## M2.6 Remote Device Validation
 
@@ -79,7 +81,22 @@ OpenPLC Modbus Slave observation
 3. Recovery：`fault_off` 恢复远端服务，OpenPLC 自动重连，`%IW0` 恢复为 `1234`。
 4. Cleanup：无论测试结果如何，均尽力恢复模拟器和映射值的正常状态。
 
-这是针对 OpenPLC Runtime v4.2.2、Editor 生成的 Remote Device 配置和 controlled pymodbus simulator 的端到端 fixed-behavior regression。它覆盖与 OpenPLC Issue #691 相关的修复后行为，不表示已经复现历史缺陷，也不代表所有 OpenPLC 版本具有相同表现。
+这是针对 OpenPLC Runtime v4.2.2、Editor 生成的 Remote Device 配置和 controlled pymodbus simulator 的端到端 fixed-behavior regression。它覆盖与 OpenPLC Issue #691 相关的修复后行为；历史复现结果见下节，两组结论均只适用于实际验证的版本和配置。
+
+## Historical Regression Comparison
+
+历史复现使用隔离的 OpenPLC Runtime v4.1.9 容器、独立持久卷和独立 loopback endpoint，避免影响当前 v4.2.2 基线。
+
+在 v4.1.9 的端到端实验中，正常通信时远端 HR0 和 `%IW0` 均为 `1234`。受控断开后，真实 FC03 请求不可用，Runtime 的 `MODBUS_MASTER` 记录连接失败；故障窗口内 20/20 次 FC04 观测仍为 `1234`，复现了历史 stale-value 行为。恢复远端服务后，通信和值均恢复正常。
+
+| Runtime | Normal | Remote disconnect | Recovery | Result |
+|---------|--------|-------------------|----------|--------|
+| v4.1.9 | `1234` | stays `1234` | `1234` | historical stale-value behavior reproduced |
+| v4.2.2 | `1234` | zero-filled to `0` | returns to `1234` | fixed behavior regression passes |
+
+源码与发布历史给出的修复边界为 Editor v4.2.10 → v4.2.11、Runtime v4.1.9 → v4.1.10：Editor 侧生成 `error_handling` 配置，Runtime 侧在远端读取失败时执行 zero-fill。该边界仅作为 source-history context；本项目实际完成端到端验证的 Runtime 版本是 v4.1.9 和 v4.2.2，不据此推断其他版本或配置具有相同行为。
+
+同一个远端设备故障场景现在能够区分历史 stale-value 行为与当前 fixed behavior，形成从缺陷复现到回归验证的闭环。
 
 ## Running the Validation
 
@@ -109,7 +126,6 @@ pytest -q
 
 ## Validation Roadmap
 
-- 使用经过验证的历史 Runtime 候选版本尝试复现修复前行为
-- 对比历史失败行为与当前 fixed behavior
-- 在有明确验证价值时扩展其他故障场景
+- 扩展具有明确验证价值的网络故障场景
+- 完善额外的恢复与可观测性覆盖
 - 持续完善日志、报告和测试证据管理
