@@ -1,0 +1,30 @@
+{
+  "name": "sim_remote_device",
+  "protocol": "modbus-tcp",
+  "modbusTcpConfig": {
+    "host": "host.docker.internal",
+    "port": 15020,
+    "timeout": 1000,
+    "slaveId": 1,
+    "ioGroups": [
+      {
+        "id": "8ee35561-3cf6-4a23-a4b7-1ad743090694",
+        "name": "remote_hr0_read",
+        "functionCode": "3",
+        "cycleTime": 100,
+        "offset": "0",
+        "length": 1,
+        "errorHandling": "set-to-zero",
+        "ioPoints": [
+          {
+            "id": "remote_hr0_read_0",
+            "name": "remote_hr0_read_0",
+            "type": "Analog Input (Holding Register)",
+            "iecLocation": "%IW0",
+            "alias": ""
+          }
+        ]
+      }
+    ]
+  }
+}

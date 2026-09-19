@@ -26,6 +26,13 @@
         "globalVariables": []
       }
     },
-    "libraries": []
+    "libraries": [],
+    "debugVariables": {
+      "pous": {
+        "main": [
+          "remote_hr0"
+        ]
+      }
+    }
   }
 }

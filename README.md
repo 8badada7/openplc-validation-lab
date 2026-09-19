@@ -20,15 +20,96 @@
 - 未注册 device_id 的异常响应与后续连接可用性验证
 - UINT 16-bit 数据边界与回绕行为验证
 - 适用测试场景中的 bounded polling 与状态恢复
+- OpenPLC Modbus Master Remote Device 正常通信链路验证
+- 可控 Python Modbus/TCP 远端设备模拟器
+- 远端通信中断后的 `set-to-zero` 行为验证
+- 远端服务恢复后的自动重连与数据恢复验证
 
-当前自动化测试结果：`8 passed`
+当前自动化测试结果：`9 passed`
 
-下一阶段将开展进一步的故障注入，并推进真实 OpenPLC Issue 的复现与回归验证，重点包括 Issue #691。
+当前 Remote Device 回归覆盖与 OpenPLC Issue #691 相关的修复后行为；尚未复现历史修复前缺陷。
+
+## M2.6 Remote Device Validation
+
+当前端到端测试拓扑：
+
+```text
+Python controlled simulator
+  Modbus/TCP: 0.0.0.0:15020, HR0=1234
+        |
+        v
+OpenPLC Modbus Master
+  Remote Device / FC03 HR0
+        |
+        v
+%IW0 / remote_hr0
+        |
+        v
+OpenPLC Modbus Slave observation
+  FC04 via 127.0.0.1:5020
+```
+
+模拟器控制接口为 `127.0.0.1:15021`，只绑定本机 loopback，支持：
+
+- `status`
+- `fault_on`
+- `fault_off`
+
+本项目当前验证使用的 Remote Device 配置为：
+
+- Device：`sim_remote_device`
+- Host：`host.docker.internal`
+- Port：`15020`
+- Slave ID：`1`
+- Function：FC03 Read Holding Registers
+- Offset / Length：`0 / 1`
+- Cycle：`100 ms`
+- IEC mapping：`%IW0`
+- Error handling：Set to zero
+- Normal remote value：`1234`
+
+以上参数属于本项目的测试 fixture 配置，不代表 OpenPLC 的通用默认值。
+
+## Modbus Master Remote Disconnect Regression
+
+正式回归测试位于 `tests/test_modbus_master_fault_recovery.py`，测试名为 `test_remote_disconnect_zero_fills_and_recovers`。它验证：
+
+1. Normal：远端 HR0 和 `%IW0` 均为 `1234`。
+2. Fault：`fault_on` 使远端 Modbus 通信不可用，映射的 `%IW0` 被清零。
+3. Recovery：`fault_off` 恢复远端服务，OpenPLC 自动重连，`%IW0` 恢复为 `1234`。
+4. Cleanup：无论测试结果如何，均尽力恢复模拟器和映射值的正常状态。
+
+这是针对 OpenPLC Runtime v4.2.2、Editor 生成的 Remote Device 配置和 controlled pymodbus simulator 的端到端 fixed-behavior regression。它覆盖与 OpenPLC Issue #691 相关的修复后行为，不表示已经复现历史缺陷，也不代表所有 OpenPLC 版本具有相同表现。
+
+## Running the Validation
+
+启动 controlled simulator：
+
+```powershell
+python src/modbus_sim_server.py
+```
+
+该进程提供：
+
+- Modbus/TCP：`0.0.0.0:15020`
+- 本地控制接口：`127.0.0.1:15021`
+- 固定测试值：`HR0=1234`
+
+正式 Remote Device fault regression 依赖 controlled simulator 正在运行；若控制接口不可达，该测试会明确 skip。PLC Stop/Start recovery tests 还需要通过环境变量提供 `OPENPLC_USERNAME` 和 `OPENPLC_PASSWORD`，仓库不保存实际凭据。
+
+运行全部测试：
+
+```powershell
+pytest -q
+```
+
+已验证结果：`9 passed`
+
+`src/modbus_fault_characterization.py` 用于手工观察 `normal → disconnect → zero-fill → recovery` 的时间过程。它是诊断和时间观测工具，不是性能 benchmark，其单次测量结果不构成恢复时间保证。
 
 ## Validation Roadmap
 
-- Modbus/TCP 功能与通信行为验证
-- 连接中断与恢复测试
-- 协议边界与异常请求测试
-- 基于真实 OpenPLC Issue 的故障复现与回归验证
-- 自动化测试、日志和测试证据管理
+- 使用经过验证的历史 Runtime 候选版本尝试复现修复前行为
+- 对比历史失败行为与当前 fixed behavior
+- 在有明确验证价值时扩展其他故障场景
+- 持续完善日志、报告和测试证据管理

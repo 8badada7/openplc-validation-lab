@@ -3,6 +3,7 @@ PROGRAM main
     cycle_counter : DINT := 0;
     mb_command : UINT AT %MW0 := 0;
     mb_response : UINT AT %MW1 := 0;
+    remote_hr0 : UINT AT %IW0 := 0;
   END_VAR
 
 cycle_counter := cycle_counter + 1;
