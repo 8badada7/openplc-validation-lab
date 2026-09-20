@@ -8,30 +8,51 @@
 
 目前已完成：
 
+### Communication Baseline
+
 - 基于 Docker 的 OpenPLC Runtime v4.2.2 测试环境
 - PLC 编译、上传、运行与基础 smoke validation
 - Modbus/TCP Server 配置、监听与寄存器映射验证
 - Python + pymodbus 端到端读写验证
-- pytest 正常通信 baseline 自动化测试
-- PLC Stop/Start 服务中断与自动恢复验证
-- 连续两轮 Stop/Start recovery stability 验证
-- 基于 Runtime HTTPS API + JWT 的 PLC 状态控制
+- OpenPLC Modbus Master Remote Device 正常通信链路验证
+
+### Protocol Validation
+
 - Modbus Holding Register mapped/unmapped 边界行为验证与自动化
 - 未注册 device_id 的异常响应与后续连接可用性验证
 - UINT 16-bit 数据边界与回绕行为验证
+
+### Fault Injection and Recovery
+
+- PLC Stop/Start 服务中断与自动恢复验证
+- 连续两轮 Stop/Start recovery stability 验证
+- 基于 Runtime HTTPS API + JWT 的 PLC 状态控制
 - 适用测试场景中的 bounded polling 与状态恢复
-- OpenPLC Modbus Master Remote Device 正常通信链路验证
 - 可控 Python Modbus/TCP 远端设备模拟器
 - 远端通信中断后的 `set-to-zero` 行为验证
 - 远端服务恢复后的自动重连与数据恢复验证
+
+### Historical Issue Reproduction
+
 - 在隔离的 OpenPLC Runtime v4.1.9 环境中复现历史 stale-value 行为
+
+### Regression Testing
+
+- pytest 正常通信 baseline 自动化测试
 - OpenPLC Runtime v4.1.9 与 v4.2.2 的端到端回归对照
 
 当前自动化测试结果：`9 passed`
 
 当前 Remote Device 回归已覆盖与 OpenPLC Issue #691 相关的历史 stale-value 行为和当前 fixed behavior。
 
-## M2.6 Remote Device Validation
+## Documentation
+
+- [Validation Scope](docs/validation_scope.md)
+- [Validation Basis](docs/validation_basis.md)
+- [Test Architecture](docs/test_architecture.md)
+- [Issue #691 Validation Report](docs/issue_691_validation.md)
+
+## Remote Device Validation Architecture
 
 当前端到端测试拓扑：
 
@@ -83,7 +104,7 @@ OpenPLC Modbus Slave observation
 
 这是针对 OpenPLC Runtime v4.2.2、Editor 生成的 Remote Device 配置和 controlled pymodbus simulator 的端到端 fixed-behavior regression。它覆盖与 OpenPLC Issue #691 相关的修复后行为；历史复现结果见下节，两组结论均只适用于实际验证的版本和配置。
 
-## Historical Regression Comparison
+## Historical Issue #691 Regression Validation
 
 历史复现使用隔离的 OpenPLC Runtime v4.1.9 容器、独立持久卷和独立 loopback endpoint，避免影响当前 v4.2.2 基线。
 
@@ -98,7 +119,27 @@ OpenPLC Modbus Slave observation
 
 同一个远端设备故障场景现在能够区分历史 stale-value 行为与当前 fixed behavior，形成从缺陷复现到回归验证的闭环。
 
+## Prerequisites
+
+- Python 3.11
+- Docker environment
+- OpenPLC Runtime v4.2.2，作为当前 regression baseline
+- `requirements.txt` 中记录的 pytest 及项目依赖
+
+部分 PLC Stop/Start recovery tests 需要通过环境变量提供 Runtime API credentials：
+
+- `OPENPLC_USERNAME`
+- `OPENPLC_PASSWORD`
+
+仓库不保存凭据的实际值。
+
 ## Running the Validation
+
+运行验证前应确认：
+
+- OpenPLC Runtime 正在运行；
+- PLC fixture 已加载并处于可运行状态；
+- Remote Device configuration 已存在。
 
 启动 controlled simulator：
 
