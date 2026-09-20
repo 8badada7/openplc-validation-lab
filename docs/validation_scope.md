@@ -8,6 +8,13 @@
 
 被测对象（System Under Test, SUT）为 OpenPLC，重点关注 OpenPLC Runtime 对外提供的 Modbus/TCP 通信行为，以及客户端、网络连接、Runtime 状态和 PLC 数据之间的交互。
 
+当前 SUT 范围同时包括：
+
+- OpenPLC Runtime 作为 Modbus TCP Server 时的通信行为；
+- OpenPLC Runtime 作为 Modbus TCP Master/Client 时的远程设备通信行为；
+- Remote Device 数据读取；
+- Modbus 通信状态变化对 IEC 数据映射的影响。
+
 每次实际测试应记录所用 OpenPLC 版本、运行配置、操作系统、通信参数和寄存器映射，避免将不同环境的结果混为一谈。
 
 ## 3. 主要接口
@@ -22,6 +29,14 @@
 - Modbus 异常响应
 
 具体地址范围、数据映射和可写权限以实际使用的 OpenPLC Runtime 版本及配置为准。
+
+除 Modbus/TCP 外，测试环境可能使用以下接口辅助验证：
+
+- Runtime API；
+- Editor 连接接口；
+- Runtime 日志。
+
+这些接口仅用于测试管理、版本确认和证据采集，不改变 Modbus/TCP 作为主要被测通信接口的定位。
 
 ## 4. 验证目标
 
@@ -46,7 +61,7 @@
 
 ### 4.4 连接恢复
 
-- 验证连接丢失后客户端能否识别中断。
+- 验证连接丢失后通信相关组件能否识别中断，并验证恢复后的通信和数据状态。
 - 验证 OpenPLC Runtime 停止并重新启动后能否重新建立连接。
 - 验证恢复后的读写能力、数据状态和响应一致性。
 - 记录恢复时间、重试次数和恢复过程中的错误信息。
@@ -72,3 +87,18 @@
 - 不以 PLC 控制逻辑和控制算法本身作为验证重点；必要的控制逻辑仅作为测试夹具。
 - 不开发或测试复杂 Web 前端、数据库平台、云平台和大模型功能。
 - 不开展认证级安全评估、渗透测试、极限性能测试或正式功能安全认证。
+
+## 7. 当前验证状态
+
+截至当前阶段，项目已经完成：
+
+- Modbus/TCP 基础通信验证；
+- Remote Device 正常通信验证；
+- connection loss fault injection；
+- OpenPLC Runtime v4.1.9 historical stale-value behavior reproduction；
+- OpenPLC Runtime v4.2.2 fixed behavior regression validation。
+
+详细实验过程和证据见：
+
+- `validation_basis.md`；
+- `issue_691_validation.md`。
