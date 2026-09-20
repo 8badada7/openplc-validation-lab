@@ -1,10 +1,13 @@
-# OpenPLC Modbus/TCP 系统测试架构（第一版）
+# OpenPLC Modbus/TCP 系统测试架构
 
 ## 文档信息
 
-- 阶段：M0.4
-- 状态：设计草案
-- 范围：系统测试架构，不包含 OpenPLC 安装、测试代码实现或测试结论
+- 初始设计阶段：M0.4
+- 当前状态：Implemented validation architecture
+- 用途：描述当前 OpenPLC Modbus/TCP validation system architecture
+- 范围：系统测试组件、数据流、故障注入、观测方式和实施状态
+
+本文档保留 M0.4 阶段确定的“设备模拟器 + OpenPLC + 测试控制器”架构思路，并同步当前 v1.0 实现状态。详细测试结果与证据边界见 `validation_basis.md` 和 `issue_691_validation.md`。
 
 ## 一、架构目标
 
@@ -18,7 +21,22 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 2. 连接丢失：测试主动停止设备，使 OpenPLC 的远程连接中断。
 3. 通信恢复：设备重新启动，观察 OpenPLC 是否重连以及数据是否恢复。
 
-第一版逻辑架构如下：
+当前系统已经包含：
+
+- Python Modbus Device Simulator；
+- OpenPLC Runtime as System Under Test（SUT）；
+- Python Test Controller with pytest；
+- Observation / Evidence Layer。
+
+当前架构实际支持：
+
+- normal communication validation；
+- connection loss fault injection；
+- recovery validation；
+- historical Issue #691 reproduction；
+- fixed behavior regression validation。
+
+当前逻辑架构如下：
 
 ```text
                          控制数据、启停与故障注入
@@ -38,7 +56,7 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 └────────────────────────┘              └──────────────────────────┘
 ```
 
-图中只描述职责和信息流，不代表 Observation / Evidence Layer 的具体接口已经确定。
+当前主要数据观测接口已经确定为 OpenPLC Modbus Slave FC04 对 `%IW0` 的读取。Runtime API 用于 PLC 状态控制与确认，Runtime 日志用于通信失败证据采集，pytest 输出用于自动化判定。
 
 ## 二、组件
 
@@ -50,13 +68,13 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 - 提供确定、可配置的寄存器数据，为测试建立稳定输入。
 - 支持受控启动、停止和恢复，用于制造 connection loss。
 - 记录启动、连接、请求、响应和停止等关键事件及时间。
-- 在后续实现中提供必要的 Coils、Discrete Inputs、Input Registers 或 Holding Registers 行为，具体范围由测试需求决定。
+- 当前为 Remote Device 场景提供确定的 Holding Register 数据，其他数据区域按未来测试需求扩展。
 
 #### 不负责
 
 - 不实现或替代 OpenPLC 的内部逻辑。
 - 不负责决定测试通过或失败。
-- 不在第一版中模拟完整工业设备、全部 Modbus 功能或真实硬件时序。
+- 不模拟完整工业设备、全部 Modbus 功能或真实硬件时序。
 - 不把模拟器自身的状态直接当作 OpenPLC 已经接收或处理数据的证据。
 
 ### 2.2 OpenPLC System Under Test
@@ -66,8 +84,8 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 - 作为 System Under Test（SUT）运行待验证的 OpenPLC 版本。
 - 配置并连接远程 Modbus/TCP device。
 - 从 Python 模拟设备读取数据，并按照 OpenPLC 的配置处理数据状态。
-- 在后续测试中应用 reset-to-zero 等待验证配置。
-- 提供可用于观察实际状态的正式或可重复接口；具体接口尚待确认。
+- 应用 Remote Device 的 `set-to-zero` error handling 配置。
+- 通过 Modbus Slave FC04、Runtime API 和 Runtime 日志提供可重复的状态观测与证据。
 
 #### 不负责
 
@@ -91,7 +109,7 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 #### 不负责
 
 - 不替代 OpenPLC 执行被测状态处理。
-- 不在观察接口尚未冻结前假定某个内部变量或临时接口一定可用。
+- 不使用未经验证的内部变量或临时接口作为正式断言依据。
 - 不根据模拟器状态推断 OpenPLC 状态，而不获取独立观测证据。
 - 不在测试未成功复现时声称某个 OpenPLC 版本存在 Issue #691 所述行为。
 
@@ -106,122 +124,135 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 
 #### 不负责
 
-- 不预先指定尚未确认可用的 OpenPLC 调试接口。
+- 不依赖未经验证的 OpenPLC 调试接口。
 - 不通过一次性人工界面观察代替可重复证据。
 - 不改变被测行为以便获得期望结果。
 - 不在证据不足时输出确定性的通过或失败结论。
 
-候选观测方式可以包括 OpenPLC 调试接口、可观察变量或其他正式接口，但最终选择必须在实际环境和官方资料中验证后再冻结。
+当前正式数据观测路径为 OpenPLC Modbus Slave FC04 对 `%IW0` 的读取；Runtime API、Runtime 日志和 pytest 输出作为状态控制与辅助证据。
 
-## 三、第一版数据流
+## 三、当前正常通信数据流
 
-正常场景的数据流为：
+Remote Device 正常通信链路为：
 
 ```text
-Python Test Controller 设置测试前提
-    → Python Modbus Device Simulator 启动并提供非零寄存器值
-    → OpenPLC 连接远程设备并读取该值
-    → Observation / Evidence Layer 获取 OpenPLC 中的实际状态
-    → Python Test Controller 比较预期值与实际值
-    → pytest 给出测试判定并保存证据
+Python Modbus Device Simulator 提供 HR0=1234
+    → OpenPLC Modbus Master 使用 FC03 读取 remote address 0
+    → Remote Device mapping 将值写入 IEC %IW0
+    → OpenPLC Modbus Slave 使用 FC04 暴露 Input Register 0
+    → Python Test Controller 读取并验证 %IW0=1234
 ```
 
 正常场景首先用于建立通信基线。只有能够证明 OpenPLC 已经通过目标数据路径读取到模拟设备提供的非零值，后续断线后的状态变化才具有可判定性。
 
 正常场景至少需要保留以下信息：
 
-- OpenPLC、模拟器和测试控制器的版本或代码标识。
-- Modbus/TCP 连接参数和寄存器映射。
-- 模拟器提供的输入值及设置时间。
-- OpenPLC 实际观测值及观测时间。
-- 请求、响应、日志和 pytest 判定。
+- OpenPLC Runtime、pymodbus 和测试依赖版本。
+- Remote Device 通信参数与 IEC mapping。
+- simulator 的确定输入值。
+- FC03 remote readiness 结果。
+- FC04 IEC observation 结果。
+- pytest 判定或 characterization 输出。
 
-## 四、故障注入数据流
+## 四、当前故障注入与恢复数据流
 
 连接中断与恢复场景的数据流为：
 
 ```text
-模拟设备与 OpenPLC 正常通信
-    → 测试控制器确认非零值已进入 OpenPLC 数据路径
-    → 测试控制器主动停止 Python Modbus Device Simulator
-    → Modbus/TCP 连接丢失
-    → Observation / Evidence Layer 持续观察 OpenPLC 状态变化
-    → 测试控制器记录断线识别、值变化、错误和超时
-    → 测试控制器恢复 Python Modbus Device Simulator
-    → OpenPLC 尝试重新建立连接
-    → 观察恢复后的连接状态和数据状态
-    → pytest 根据已冻结的判定条件执行断言
+Simulator 与 OpenPLC 正常通信
+    → 测试控制器确认 remote HR0 和 %IW0 均为 1234
+    → fault_on 停止 simulator 的 Modbus 服务
+    → 真实 FC03 请求确认远端服务不可用
+    → Runtime MODBUS_MASTER 记录读取或连接失败
+    → 测试控制器通过 FC04 持续观察 %IW0
+    → fault_off 恢复 simulator，HR0 重建为 1234
+    → OpenPLC Modbus Master 重新建立通信
+    → FC04 观察 %IW0 恢复并保持 1234
 ```
 
-故障注入必须由测试控制器明确记录开始和结束时间。断线后的预期值、允许延迟和恢复条件在实际配置与官方行为确认前保持为待定参数，不能在当前设计阶段编造。
+故障注入采用明确 timeout 和 bounded polling，不使用无限等待。测试清理逻辑会尽最大努力恢复 simulator normal 状态和 OpenPLC 数据链路。单次故障识别或恢复时间只作为运行证据，不构成性能保证。
 
-## 五、Issue #691 后续复现思路
+## 五、Issue #691 验证状态
 
-- Issue #691 是 OpenPLC Editor 仓库中的真实公开 Issue，描述连接丢失后 reset-to-zero 未按预期生效、旧值仍被保留的现象。
-- OpenPLC Editor v4.2.11 Release Notes 声明已修复与 Issue #691 相关的 Modbus/TCP 连接丢失行为。
-- Release Notes 属于修复声明，不是本项目的独立验证结果。
-- 本项目当前尚未安装相关 OpenPLC 环境，也尚未复现 Issue #691。
-- 后续首先在选定的 Runtime / Editor 版本组合上建立正常通信基线，证明 OpenPLC 可以稳定读取模拟设备提供的非零值。
-- 在确认版本可获取、环境兼容并能够配置目标数据路径后，再选择一个修复前版本作为“候选复现版本”。
-- 候选版本只表示具有复现价值。只有在受控环境中实际观察到与 Issue 描述一致、且能够重复的行为后，才能声称该版本在当前配置下存在此行为。
-- 不预先断言 v4.2.10 或任何其他具体版本一定存在该 Bug。
-- 成功复现后，应保存版本、配置、输入、时间线、日志和实际状态，再在声明修复的版本上执行相同测试作为 regression test（回归测试）。
-- 修复版本只有通过相同场景和相同判定标准后，才能形成“本项目验证通过”的结论。
+- Issue #691 是 OpenPLC Editor 仓库中的公开缺陷报告，描述连接丢失后 reset-to-zero 未按预期生效、旧值仍被保留的现象。
+- OpenPLC Editor v4.2.11 Release Notes 将相关问题列为修复项；该记录是官方修复声明，不是本项目测试结果。
+- 在 OpenPLC Runtime v4.1.9 和当前测试配置下，远端通信确实失败且 Runtime 记录连接错误时，20/20 次 `%IW0` 观测仍保持 `1234`，historical stale-value behavior 已复现。
+- 在 OpenPLC Runtime v4.2.2 和当前测试配置下，正式回归验证了 `1234 → connection loss → 0 → recovery → 1234` 的 fixed behavior。
+- 上述结论仅适用于实际验证的版本和配置，不代表所有旧版本或所有新版本具有相同行为。
 
-## 六、分阶段实施策略
+完整环境、配置、证据和结论边界见 `issue_691_validation.md`。
+
+## 六、分阶段实施策略与状态
 
 ### Stage 1：OpenPLC 基础环境和正常通信
 
-- 选择并记录第一组 Runtime / Editor 版本。
-- 建立可重复的 OpenPLC 基础环境。
-- 完成最小远程 Modbus/TCP device 配置。
-- 通过人工可核对步骤建立一次正常通信基线。
-- 阶段出口：能够明确说明数据来源、数据路径和实际观测结果。
+状态：已完成。
+
+- 建立并记录 OpenPLC Runtime v4.2.2 当前验证环境。
+- 完成 PLC 编译、上传、运行和基础 smoke validation。
+- 配置 Modbus/TCP Server 和 Remote Device。
+- 建立可重复的正常通信基线并确认数据路径。
 
 ### Stage 2：Python 自动化 Modbus 基线测试
 
-- 建立 Python 侧最小 Modbus/TCP 连接、请求和响应验证能力。
+状态：已完成。
+
+- 建立 Python 侧 Modbus/TCP 连接、请求和响应验证能力。
 - 使用 pytest 固化正常连接、合法请求、超时和清理流程。
+- 完成地址边界、unknown device ID 和 UINT 边界验证。
 - 明确连接参数、测试数据和失败信息格式。
-- 阶段出口：自动化基线测试稳定、可重复，失败时能够提供可诊断信息。
 
 ### Stage 3：Python Modbus Device Simulator
 
+状态：已完成。
+
 - 实现满足目标数据路径所需的最小 Modbus/TCP 设备行为。
-- 提供可控寄存器数据以及启动、停止和恢复控制。
-- 增加连接与请求日志，支持测试控制器同步状态。
-- 阶段出口：OpenPLC 能够稳定读取模拟器提供的已知非零值。
+- 提供确定寄存器数据以及 normal、fault 和 recovery 控制。
+- 使用独立 loopback control channel 同步 simulator 状态。
+- 验证 Docker Runtime 到 Windows host simulator 的通信链路。
 
 ### Stage 4：连接中断和恢复故障注入
 
-- 由测试控制器编排正常、停止、等待和恢复步骤。
-- 建立断线识别、重连和恢复后数据检查。
-- 冻结超时、轮询和证据记录规则。
-- 阶段出口：故障注入可重复执行，结果具有明确证据和判定。
+状态：已完成。
+
+- 由测试控制器编排正常、故障、观测和恢复步骤。
+- 使用真实 FC03 验证远端通信中断。
+- 使用 FC04 持续观察 OpenPLC IEC 数据状态。
+- 使用 bounded polling、timeout 和 cleanup 保证测试可控。
 
 ### Stage 5：Issue #691 复现与 Regression Test
 
-- 选择修复前候选版本并执行受控复现。
-- 只有复现成功后才固化缺陷断言和复现证据。
-- 在声明修复的版本上运行相同测试。
-- 阶段出口：形成区分“复现结果”“修复声明”和“回归验证结果”的记录。
+状态：已完成。
+
+- 在隔离的 Runtime v4.1.9 环境中复现 historical stale-value behavior。
+- 在 Runtime v4.2.2 环境中验证 fixed behavior。
+- 区分公开 Issue、官方修复声明和本项目测试结果。
+- 形成历史行为与当前行为的端到端回归对照。
 
 ### Stage 6：日志、报告和自动回归完善
 
-- 统一模拟器、控制器与 OpenPLC 日志的时间和关联标识。
-- 生成结构化测试报告与失败证据。
-- 完善清理、重复执行、版本矩阵和回归测试集。
-- 阶段出口：测试能够按明确环境说明重复运行，并输出可审查结果。
+状态：持续维护。
 
-## 七、当前不确定项
+- 维护 simulator、控制器与 OpenPLC 日志的证据关联。
+- 完善结构化报告、失败证据和重复执行流程。
+- 扩展必要的 observability 和回归覆盖。
+- 评估 CI integration 的适用范围和环境要求。
 
-以下项目必须在实际环境和官方文档中确认后再冻结：
+## 七、已确认项与后续事项
 
-- OpenPLC 内部状态最终采用什么接口观察。
-- Runtime / Editor 最终采用哪些版本组合进行基线、候选复现和回归测试。
-- reset-to-zero 的精确配置入口、作用对象和生效条件。
-- OpenPLC 对连接丢失的判定机制、断线判定时间和相关超时参数。
-- OpenPLC 与模拟设备之间实际使用的寄存器类型、地址映射和轮询周期。
-- Runtime 恢复后是自动重连、需要外部触发，还是由其他配置决定。
+### 已确认
 
-在上述事项确认前，文档只保留候选方案和待验证假设，不写入未经证实的实现细节或测试结果。
+- Remote Device 配置和 `set-to-zero` error handling；
+- `%IW0` 作为 Remote Device IEC observation variable；
+- FC03 remote read 与 FC04 observation data path；
+- Python Modbus Device Simulator 的受控 fault/recovery 接口；
+- OpenPLC Runtime v4.1.9 historical candidate 验证环境；
+- OpenPLC Runtime v4.2.2 current regression baseline；
+- Runtime API、Runtime 日志和 Modbus observation 的证据用途。
+
+### 后续事项
+
+- 扩展更多 Modbus 协议覆盖；
+- 增加具有明确验证价值的 fault scenarios；
+- 持续完善日志、报告和观测能力；
+- 评估并设计适合外部 Runtime 依赖的 CI integration。
