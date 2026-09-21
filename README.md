@@ -62,41 +62,39 @@
 当前端到端测试拓扑：
 
 ```mermaid
-flowchart LR
-    subgraph Host["Host test layer"]
-        Pytest["pytest controller"]
-        APIClient["Runtime API client"]
-        ModbusClient["Modbus test client"]
-        ControlClient["Simulator control client"]
-        Pytest --> APIClient
-        Pytest --> ModbusClient
-        Pytest --> ControlClient
-    end
+flowchart TB
+    Suite["Python / pytest Validation Suite"]
 
-    subgraph Runtime["OpenPLC Runtime v4.2.2 — openplc-runtime"]
+    subgraph Runtime["OpenPLC Runtime v4.2.2"]
         API["Runtime API :8443"]
         Master["Modbus Master"]
-        IEC["PLC logic / IEC memory — %IW0 remote_hr0"]
+        IEC["PLC / IEC %IW0"]
         Slave["Modbus Slave :5020"]
         Master -->|"%IW0"| IEC
         IEC -->|"Input Register 0"| Slave
     end
 
     subgraph Simulator["Controlled Remote Device Simulator"]
-        Remote["Modbus/TCP host :15020 — HR0=1234"]
-        Control["Control 127.0.0.1:15021"]
-        Control -.->|"fault_on/off · delay_on/off"| Remote
+        Remote["Modbus/TCP :15020"]
+        HR0["HR0=1234"]
+        Control["Control :15021"]
+        HR0 --> Remote
     end
 
-    APIClient -->|"127.0.0.1:8443 → container :8443"| API
-    ModbusClient -->|"FC04 read request · 127.0.0.1:5020 → container :5020"| Slave
-    Slave -->|"response · Input Register 0 / %IW0"| ModbusClient
-    ControlClient -->|"status / fault / delay"| Control
-    Master -->|"FC03 · host.docker.internal:15020 · device_id=1 · offset=0 · length=1"| Remote
+    Suite -->|"Runtime API"| API
+    Suite -->|"FC04 read"| Slave
+    Slave -->|"FC04 response"| Suite
+    Suite -->|"fault / delay"| Control
+    Master -->|"FC03"| Remote
     Remote -->|"HR0=1234"| Master
 ```
 
-模拟器控制接口为 `127.0.0.1:15021`，只绑定本机 loopback，支持：
+- Runtime API：`127.0.0.1:8443`
+- FC04 observation：`127.0.0.1:5020`
+- simulator Modbus：host port `15020`
+- simulator control：`127.0.0.1:15021`
+
+模拟器控制接口只绑定本机 loopback，支持：
 
 - `status`
 - `fault_on`

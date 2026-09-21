@@ -39,49 +39,30 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 - historical Issue #691 reproduction；
 - fixed behavior regression validation。
 
-当前逻辑架构如下：
+### Normal Data and Observation Path
 
 ```mermaid
-flowchart LR
-    subgraph Host["Host test and observation layer"]
-        Test["pytest controller"]
-        APIClient["Runtime API client"]
-        Observer["FC04 observation client"]
-        SimControl["Simulator control client"]
-        DockerControl["Docker lifecycle control"]
-        Test --> APIClient
-        Test --> Observer
-        Test --> SimControl
-        Test --> DockerControl
-    end
+flowchart TB
+    Remote["Remote Simulator — HR0=1234"]
+    Master["OpenPLC Modbus Master"]
+    IEC["IEC %IW0 / remote_hr0"]
+    Slave["OpenPLC Modbus Slave"]
+    Observer["pytest FC04 Observer"]
 
-    subgraph Runtime["Current OpenPLC Runtime v4.2.2"]
-        Core["Runtime / PLC / plugins"]
-        API["Runtime API :8443"]
-        Master["Modbus Master"]
-        IEC["IEC memory — %IW0 remote_hr0"]
-        Slave["Modbus Slave :5020"]
-        Core --- API
-        Core --- Master
-        Core --- Slave
-        Master -->|"map remote value"| IEC
-        IEC -->|"Input Register 0"| Slave
-    end
-
-    subgraph Simulator["Controlled Remote Device Simulator"]
-        Remote["Modbus/TCP :15020 — device_id=1 — HR0=1234"]
-        Control["Loopback control :15021"]
-        Control -.->|"connection loss or delayed response"| Remote
-    end
-
-    APIClient -->|"127.0.0.1:8443"| API
-    Master -->|"FC03 · host.docker.internal:15020"| Remote
-    Remote -->|"HR0=1234"| Master
-    Observer -->|"FC04 read request · 127.0.0.1:5020"| Slave
-    Slave -->|"response · Input Register 0 / %IW0"| Observer
-    SimControl -->|"status · fault_on/off · delay_on/off"| Control
-    DockerControl -.->|"docker restart current Runtime"| Core
+    Master -->|"FC03 read request"| Remote
+    Remote -->|"FC03 response · HR0=1234"| Master
+    Master -->|"map value"| IEC
+    IEC -->|"Input Register 0"| Slave
+    Observer -->|"FC04 read request"| Slave
+    Slave -->|"FC04 response · %IW0"| Observer
 ```
+
+| Interface | Endpoint | Purpose |
+| --- | --- | --- |
+| Runtime API | `127.0.0.1:8443` | PLC status and lifecycle control |
+| FC04 observation | `127.0.0.1:5020` | Read Input Register 0 / `%IW0` |
+| Remote FC03 | `host.docker.internal:15020` | `device_id=1`, offset `0`, length `1` |
+| Simulator control | `127.0.0.1:15021` | `status`, connection-loss and delay control |
 
 当前主要数据观测接口已经确定为 OpenPLC Modbus Slave FC04 对 `%IW0` 的读取。Runtime API 用于 PLC 状态控制与确认，Runtime 日志用于通信失败证据采集，pytest 输出用于自动化判定。
 
@@ -186,50 +167,42 @@ Python Modbus Device Simulator 提供 HR0=1234
 
 ## 四、当前故障注入与恢复数据流
 
+### Fault Injection and Recovery
+
+```mermaid
+flowchart TB
+    Normal["Normal · %IW0=1234"]
+
+    Normal --> FaultOn["fault_on"]
+    FaultOn --> Unavailable["Remote unavailable"]
+    Unavailable --> LossHandling["OpenPLC failure handling"]
+    LossHandling --> LossZero["%IW0 stable 0"]
+    LossZero --> FaultOff["fault_off"]
+    FaultOff --> LossRecovery["Recovery · %IW0=1234"]
+
+    Normal --> DelayOn["delay_on"]
+    DelayOn --> Timeout["Terminal timeout after current retry behavior"]
+    Timeout --> DelayHandling["OpenPLC failure handling"]
+    DelayHandling --> DelayZero["%IW0 stable 0"]
+    DelayZero --> DelayOff["delay_off"]
+    DelayOff --> DelayRecovery["Recovery · %IW0=1234"]
+```
+
 ### 4.1 连接丢失与恢复
 
-连接中断与恢复场景的数据流为：
-
-```text
-Simulator 与 OpenPLC 正常通信
-    → 测试控制器确认 remote HR0 和 %IW0 均为 1234
-    → fault_on 停止 simulator 的 Modbus 服务
-    → 真实 FC03 请求确认远端服务不可用
-    → Runtime MODBUS_MASTER 记录读取或连接失败
-    → 测试控制器通过 FC04 持续观察 %IW0
-    → fault_off 恢复 simulator，HR0 重建为 1234
-    → OpenPLC Modbus Master 重新建立通信
-    → FC04 观察 %IW0 恢复并保持 1234
-```
+`fault_on` 停止 simulator 的 Modbus 服务；真实 FC03 请求用于确认远端不可用，FC04 observation 用于验证 `%IW0` 稳定清零。`fault_off` 恢复服务后，OpenPLC 重新连接并使 `%IW0` 恢复为 `1234`。
 
 故障注入采用明确 timeout 和 bounded polling，不使用无限等待。测试清理逻辑会尽最大努力恢复 simulator normal 状态和 OpenPLC 数据链路。单次故障识别或恢复时间只作为运行证据，不构成性能保证。
 
 ### 4.2 终止性响应超时与恢复
 
-当前已验证的 delayed-response 数据流为：
-
-```text
-OpenPLC Modbus Master 发送 FC03
-    → simulator 保持 listener 可用并受控延迟目标响应
-    → 当前 timeout/retry 预算耗尽并进入终止性失败路径
-    → set-to-zero 将 %IW0 更新为 0
-    → delay_off 取消响应延迟
-    → remote HR0 和 %IW0 稳定恢复为 1234
-```
+`delay_on` 保持 listener 可用并延迟目标 FC03 响应；当前 timeout/retry 预算耗尽后进入终止性失败路径，`set-to-zero` 使 `%IW0` 稳定为 `0`。`delay_off` 取消延迟后，remote HR0 和 `%IW0` 恢复为 `1234`。
 
 当前验证使用 `delay_on 5000` 作为明确故障注入值；该值不是 Modbus 协议或 OpenPLC 的通用 timeout 阈值，也不用于断言精确清零或恢复时间。
 
 ### 4.3 Runtime 容器重启与恢复
 
-当前 Runtime lifecycle 数据流为：
-
-```text
-确认 current v4.2.2 持久化 fixture、API 和 %IW0=1234 正常
-    → docker restart openplc-runtime
-    → 观察到 Runtime API、container state 或 FC04 的真实中断
-    → Runtime API、PLC、plugins 和 Modbus 通信恢复
-    → FC04 连续观察 %IW0 稳定为 1234
-```
+当前 Runtime lifecycle 路径为：`docker restart openplc-runtime` → 观察到真实中断 → Runtime API、PLC、plugins 和 Modbus 恢复 → FC04 连续观察 `%IW0` 稳定为 `1234`。
 
 该场景验证当前持久化 fixture 的容器 restart recovery，不等同于进程 crash、主机掉电或其他 OpenPLC 版本，也不提供恢复延迟保证。
 
