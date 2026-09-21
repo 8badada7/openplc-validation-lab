@@ -41,22 +41,46 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 
 当前逻辑架构如下：
 
-```text
-                         控制数据、启停与故障注入
-                  ┌────────────────────────────────┐
-                  │                                ▼
-┌────────────────────────┐              ┌──────────────────────────┐
-│ Python Test Controller │              │ Python Modbus Device    │
-│        + pytest         │              │ Simulator               │
-└───────────┬────────────┘              └────────────┬─────────────┘
-            │                                        │
-            │ 测试编排、断言                         │ Modbus/TCP
-            │                                        │
-            ▼                                        ▼
-┌────────────────────────┐              ┌──────────────────────────┐
-│ Observation / Evidence │◄─────────────│ OpenPLC System Under    │
-│ Layer                  │  状态与证据   │ Test                    │
-└────────────────────────┘              └──────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Host["Host test and observation layer"]
+        Test["pytest controller"]
+        APIClient["Runtime API client"]
+        Observer["FC04 observation client"]
+        SimControl["Simulator control client"]
+        DockerControl["Docker lifecycle control"]
+        Test --> APIClient
+        Test --> Observer
+        Test --> SimControl
+        Test --> DockerControl
+    end
+
+    subgraph Runtime["Current OpenPLC Runtime v4.2.2"]
+        Core["Runtime / PLC / plugins"]
+        API["Runtime API :8443"]
+        Master["Modbus Master"]
+        IEC["IEC memory — %IW0 remote_hr0"]
+        Slave["Modbus Slave :5020"]
+        Core --- API
+        Core --- Master
+        Core --- Slave
+        Master -->|"map remote value"| IEC
+        IEC -->|"Input Register 0"| Slave
+    end
+
+    subgraph Simulator["Controlled Remote Device Simulator"]
+        Remote["Modbus/TCP :15020 — device_id=1 — HR0=1234"]
+        Control["Loopback control :15021"]
+        Control -.->|"connection loss or delayed response"| Remote
+    end
+
+    APIClient -->|"127.0.0.1:8443"| API
+    Master -->|"FC03 · host.docker.internal:15020"| Remote
+    Remote -->|"HR0=1234"| Master
+    Observer -->|"FC04 read request · 127.0.0.1:5020"| Slave
+    Slave -->|"response · Input Register 0 / %IW0"| Observer
+    SimControl -->|"status · fault_on/off · delay_on/off"| Control
+    DockerControl -.->|"docker restart current Runtime"| Core
 ```
 
 当前主要数据观测接口已经确定为 OpenPLC Modbus Slave FC04 对 `%IW0` 的读取。Runtime API 用于 PLC 状态控制与确认，Runtime 日志用于通信失败证据采集，pytest 输出用于自动化判定。

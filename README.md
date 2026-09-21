@@ -53,6 +53,7 @@
 - [Validation Scope](docs/validation_scope.md)
 - [Validation Basis](docs/validation_basis.md)
 - [Test Architecture](docs/test_architecture.md)
+- [Test Matrix](docs/test_matrix.md)
 - [Issue #691 Validation Report](docs/issue_691_validation.md)
 - [Project Roadmap](docs/roadmap.md)
 
@@ -60,20 +61,39 @@
 
 当前端到端测试拓扑：
 
-```text
-Python controlled simulator
-  Modbus/TCP: 0.0.0.0:15020, HR0=1234
-        |
-        v
-OpenPLC Modbus Master
-  Remote Device / FC03 HR0
-        |
-        v
-%IW0 / remote_hr0
-        |
-        v
-OpenPLC Modbus Slave observation
-  FC04 via 127.0.0.1:5020
+```mermaid
+flowchart LR
+    subgraph Host["Host test layer"]
+        Pytest["pytest controller"]
+        APIClient["Runtime API client"]
+        ModbusClient["Modbus test client"]
+        ControlClient["Simulator control client"]
+        Pytest --> APIClient
+        Pytest --> ModbusClient
+        Pytest --> ControlClient
+    end
+
+    subgraph Runtime["OpenPLC Runtime v4.2.2 — openplc-runtime"]
+        API["Runtime API :8443"]
+        Master["Modbus Master"]
+        IEC["PLC logic / IEC memory — %IW0 remote_hr0"]
+        Slave["Modbus Slave :5020"]
+        Master -->|"%IW0"| IEC
+        IEC -->|"Input Register 0"| Slave
+    end
+
+    subgraph Simulator["Controlled Remote Device Simulator"]
+        Remote["Modbus/TCP host :15020 — HR0=1234"]
+        Control["Control 127.0.0.1:15021"]
+        Control -.->|"fault_on/off · delay_on/off"| Remote
+    end
+
+    APIClient -->|"127.0.0.1:8443 → container :8443"| API
+    ModbusClient -->|"FC04 read request · 127.0.0.1:5020 → container :5020"| Slave
+    Slave -->|"response · Input Register 0 / %IW0"| ModbusClient
+    ControlClient -->|"status / fault / delay"| Control
+    Master -->|"FC03 · host.docker.internal:15020 · device_id=1 · offset=0 · length=1"| Remote
+    Remote -->|"HR0=1234"| Master
 ```
 
 模拟器控制接口为 `127.0.0.1:15021`，只绑定本机 loopback，支持：
