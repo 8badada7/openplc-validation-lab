@@ -15,20 +15,26 @@ Completed:
 
 ## v1.1
 
-Planned:
+Completed:
 
 ### Fault Injection Expansion
 
 - Runtime restart recovery testing
+- Terminal delayed-response timeout recovery testing
+- Additional automated regression cases
+
+
+Planned:
+
+### Fault Injection Expansion
+
 - Network interruption scenarios
-- Extended communication failure handling
 
 
 ### Test Infrastructure
 
 - Structured validation reports
 - Improved evidence collection
-- Additional automated regression cases
 
 
 ## Future

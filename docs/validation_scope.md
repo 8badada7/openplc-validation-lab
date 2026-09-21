@@ -62,7 +62,9 @@
 ### 4.4 连接恢复
 
 - 验证连接丢失后通信相关组件能否识别中断，并验证恢复后的通信和数据状态。
-- 验证 OpenPLC Runtime 停止并重新启动后能否重新建立连接。
+- 验证通过 Runtime API 执行 PLC 服务 Stop/Start 后能否恢复 Modbus 通信。
+- 验证当前持久化 fixture 在 Runtime 容器 restart 后能否恢复 API、PLC、Modbus Master/Slave 和数据链路。
+- 验证 Remote Device 连接丢失及终止性响应超时后，`set-to-zero` 和通信恢复行为是否符合当前配置。
 - 验证恢复后的读写能力、数据状态和响应一致性。
 - 记录恢复时间、重试次数和恢复过程中的错误信息。
 
@@ -79,6 +81,7 @@
 - 地址边界和超时阈值必须来自实际版本、配置或明确的测试前提，不在文档中预设未经核实的数值。
 - 已报告问题、官方修复声明和本项目测试结果必须分别记录，不得相互替代。
 - 在尚未执行测试时，只记录测试设计，不编写通过或失败结论。
+- 当前 Runtime 容器 restart 结果不等同于进程 crash 或主机掉电恢复，也不代表其他 Runtime 版本。
 
 ## 6. 当前不测试的内容
 
@@ -87,6 +90,8 @@
 - 不以 PLC 控制逻辑和控制算法本身作为验证重点；必要的控制逻辑仅作为测试夹具。
 - 不开发或测试复杂 Web 前端、数据库平台、云平台和大模型功能。
 - 不开展认证级安全评估、渗透测试、极限性能测试或正式功能安全认证。
+- 不进行完整 Modbus 协议认证、性能/SLA 保证、压力测试或长时间 soak test。
+- 当前不覆盖网络层 packet corruption、packet loss 等故障注入，也不包含 hardware-in-the-loop。
 
 ## 7. 当前验证状态
 
@@ -94,7 +99,10 @@
 
 - Modbus/TCP 基础通信验证；
 - Remote Device 正常通信验证；
-- connection loss fault injection；
+- PLC 服务 Stop/Start 与通信恢复验证；
+- 当前 Runtime v4.2.2 容器 restart recovery 验证；
+- Remote Device connection loss fault injection 与恢复验证；
+- Remote Device terminal delayed-response timeout、清零与恢复验证；
 - OpenPLC Runtime v4.1.9 historical stale-value behavior reproduction；
 - OpenPLC Runtime v4.2.2 fixed behavior regression validation。
 

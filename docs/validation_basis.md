@@ -55,22 +55,24 @@
 - 当前状态：已经完成以下验证：
   - Runtime v4.1.9：在当前测试配置下复现连接丢失后 IEC 变量保持最后成功值的行为。
   - Runtime v4.2.2：在相同测试思路下验证 set-to-zero 行为，即断线后清零，恢复连接后恢复数据。
+- Evidence：
+  - `tests/test_modbus_master_fault_recovery.py`
 - 结论限制：该结论仅适用于已验证版本和当前测试配置，不代表所有 OpenPLC 版本具有相同行为。
 
-### VB-002：Runtime 停止、重启与连接恢复
+### VB-002：PLC 服务、Runtime 容器重启与连接恢复
 
 - 类型：主动设计的可靠性测试场景。
-- 测试依据：Runtime 生命周期变化会中断客户端与服务端之间的通信状态，需要验证中断识别和恢复路径。
-- 验证内容：客户端识别连接中断的方式、超时与错误信息、Runtime 恢复后的重连能力、恢复时间，以及恢复后的数据正确性。
+- 测试依据：PLC 服务或 Runtime 容器的生命周期变化会中断相关通信状态，需要分别验证中断识别和恢复路径。
+- 验证内容：通过 Runtime API 执行 PLC Stop/Start，以及执行当前 Runtime 容器 restart 后，验证实际中断、服务恢复、Modbus 重连和数据正确性。
 - 当前状态：已完成部分验证：
-  - Runtime 停止/启动恢复测试；
-  - Modbus 通信恢复测试。
+  - 通过 Runtime API 执行 PLC Stop/Start，并验证 Modbus 通信恢复；
+  - 对当前持久化 fixture 执行 Docker Runtime 容器 restart，并验证 Runtime API、PLC、Modbus Master/Slave 和 `%IW0` 数据链路恢复。
 - 已验证环境：
   - Runtime：OpenPLC Runtime v4.2.2
 - Evidence：
   - `tests/test_modbus_recovery.py`
-  - `tests/test_modbus_master_fault_recovery.py`
-- 结论限制：该场景属于主动设计的可靠性验证，不据此称为已确认的 OpenPLC Bug。
+  - `tests/test_runtime_restart_recovery.py`
+- 结论限制：该场景属于主动设计的可靠性验证；容器 restart 不等同于进程 crash 或主机掉电，观测耗时也不构成恢复时间保证。
 
 ### VB-003：Modbus 地址边界与非法请求
 
@@ -98,12 +100,23 @@
   - boundary access
 - 结论限制：当前结果不是完整 Modbus 协议一致性测试或协议认证，也不代表其余场景一定存在缺陷。
 
+### VB-004：远端终止性响应超时与恢复
+
+- 类型：主动设计的通信可靠性测试场景。
+- 测试依据：远端服务仍可建立连接但未在当前通信预算内返回有效响应，与连接丢失属于不同故障路径，需要独立验证 `set-to-zero` 和恢复行为。
+- 验证内容：在当前 `timeout_ms=1000`、pymodbus 3.11.2 默认 `retries=3` 和 `error_handling=set-to-zero` 配置下，通过 simulator 延迟目标 FC03 响应，验证重试耗尽后的清零和解除延迟后的数据恢复。
+- 当前状态：已验证 OpenPLC Runtime v4.2.2 在 `delay_on 5000` 故障注入下使 `%IW0` 稳定为 `0`，执行 `delay_off` 后远端值和 `%IW0` 稳定恢复为 `1234`。
+- Evidence：
+  - `tests/test_modbus_master_timeout_recovery.py`
+- 结论限制：`5000 ms` 是当前测试使用的故障注入值，不是 Modbus 协议或 OpenPLC 的通用 timeout 阈值；该结果不构成性能保证，也不泛化到所有功能码、设备和配置。
+
 ## 5. 当前结论边界
 
 | 验证项 | 已报告缺陷 | 官方修复声明 | 本项目已验证 |
 | --- | --- | --- | --- |
 | VB-001：连接丢失后的 reset-to-zero 行为 | 是，Issue #691 | 是，v4.2.11 Release Notes | 是（v4.1.9 复现，v4.2.2 回归验证） |
-| VB-002：Runtime 停止、重启与连接恢复 | 否 | 不适用 | 部分验证 |
+| VB-002：PLC 服务、Runtime 容器重启与连接恢复 | 否 | 不适用 | 部分验证 |
 | VB-003：Modbus 地址边界与非法请求 | 否 | 不适用 | 部分验证 |
+| VB-004：远端终止性响应超时与恢复 | 否 | 不适用 | 是（v4.2.2 当前配置） |
 
 后续只有在记录测试环境、版本、配置、步骤、实际响应、日志和可重复结果后，才能更新“本项目已验证”状态。

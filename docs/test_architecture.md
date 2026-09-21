@@ -7,7 +7,7 @@
 - 用途：描述当前 OpenPLC Modbus/TCP validation system architecture
 - 范围：系统测试组件、数据流、故障注入、观测方式和实施状态
 
-本文档保留 M0.4 阶段确定的“设备模拟器 + OpenPLC + 测试控制器”架构思路，并同步当前 v1.0 实现状态。详细测试结果与证据边界见 `validation_basis.md` 和 `issue_691_validation.md`。
+本文档保留 M0.4 阶段确定的“设备模拟器 + OpenPLC + 测试控制器”架构思路，并同步当前 v1.1 已实现状态。详细测试结果与证据边界见 `validation_basis.md` 和 `issue_691_validation.md`。
 
 ## 一、架构目标
 
@@ -15,11 +15,12 @@
 
 OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP device 并正常通信后，远程连接丢失时，配置为 reset-to-zero 的值仍被保留。因此，忠实复现该问题需要让 OpenPLC 主动连接一个可控的远程设备，而不是只让 Python 作为普通 Modbus Client 读取 OpenPLC。
 
-设备模拟器用于控制远程数据和连接生命周期；OpenPLC 作为被测系统执行实际的远程设备通信与状态处理；测试控制器负责安排步骤、制造故障、收集观测结果并执行断言。通过分离这些职责，可以主动构造并重复执行以下三类状态：
+设备模拟器用于控制远程数据和连接生命周期；OpenPLC 作为被测系统执行实际的远程设备通信与状态处理；测试控制器负责安排步骤、制造故障、收集观测结果并执行断言。通过分离这些职责，可以主动构造并重复执行以下状态：
 
 1. 正常通信：设备在线并提供确定的寄存器值。
 2. 连接丢失：测试主动停止设备，使 OpenPLC 的远程连接中断。
-3. 通信恢复：设备重新启动，观察 OpenPLC 是否重连以及数据是否恢复。
+3. 响应延迟：设备 listener 保持可用，但目标 FC03 响应被受控延迟。
+4. 通信恢复：取消连接或延迟故障，观察 OpenPLC 是否重连以及数据是否恢复。
 
 当前系统已经包含：
 
@@ -32,6 +33,8 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 
 - normal communication validation；
 - connection loss fault injection；
+- terminal delayed-response timeout fault injection；
+- Runtime container restart recovery；
 - recovery validation；
 - historical Issue #691 reproduction；
 - fixed behavior regression validation。
@@ -67,6 +70,8 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 - 模拟 OpenPLC 所连接的远程 Modbus/TCP 设备。
 - 提供确定、可配置的寄存器数据，为测试建立稳定输入。
 - 支持受控启动、停止和恢复，用于制造 connection loss。
+- 支持 normal、fault 和 delayed 模式，以区分连接丢失与响应超时路径。
+- 通过 `status`、`fault_on`、`fault_off`、`delay_on <ms>` 和 `delay_off` 提供有界、可确认的控制接口。
 - 记录启动、连接、请求、响应和停止等关键事件及时间。
 - 当前为 Remote Device 场景提供确定的 Holding Register 数据，其他数据区域按未来测试需求扩展。
 
@@ -102,6 +107,7 @@ OpenPLC Editor Issue #691 描述的场景是：OpenPLC 配置远程 Modbus/TCP d
 - 设置模拟设备的初始数据和测试数据。
 - 检查各组件是否达到测试前置状态。
 - 按测试步骤启动、停止和恢复模拟设备，主动制造连接中断。
+- 控制 simulator 的响应延迟，并编排当前 Runtime 容器 restart 场景。
 - 记录操作时间点，协调等待、轮询和超时判定。
 - 从 Observation / Evidence Layer 采集 OpenPLC 的实际结果。
 - 将预期行为与实际结果比较，生成明确的通过、失败或不可判定结果。
@@ -156,6 +162,8 @@ Python Modbus Device Simulator 提供 HR0=1234
 
 ## 四、当前故障注入与恢复数据流
 
+### 4.1 连接丢失与恢复
+
 连接中断与恢复场景的数据流为：
 
 ```text
@@ -171,6 +179,35 @@ Simulator 与 OpenPLC 正常通信
 ```
 
 故障注入采用明确 timeout 和 bounded polling，不使用无限等待。测试清理逻辑会尽最大努力恢复 simulator normal 状态和 OpenPLC 数据链路。单次故障识别或恢复时间只作为运行证据，不构成性能保证。
+
+### 4.2 终止性响应超时与恢复
+
+当前已验证的 delayed-response 数据流为：
+
+```text
+OpenPLC Modbus Master 发送 FC03
+    → simulator 保持 listener 可用并受控延迟目标响应
+    → 当前 timeout/retry 预算耗尽并进入终止性失败路径
+    → set-to-zero 将 %IW0 更新为 0
+    → delay_off 取消响应延迟
+    → remote HR0 和 %IW0 稳定恢复为 1234
+```
+
+当前验证使用 `delay_on 5000` 作为明确故障注入值；该值不是 Modbus 协议或 OpenPLC 的通用 timeout 阈值，也不用于断言精确清零或恢复时间。
+
+### 4.3 Runtime 容器重启与恢复
+
+当前 Runtime lifecycle 数据流为：
+
+```text
+确认 current v4.2.2 持久化 fixture、API 和 %IW0=1234 正常
+    → docker restart openplc-runtime
+    → 观察到 Runtime API、container state 或 FC04 的真实中断
+    → Runtime API、PLC、plugins 和 Modbus 通信恢复
+    → FC04 连续观察 %IW0 稳定为 1234
+```
+
+该场景验证当前持久化 fixture 的容器 restart recovery，不等同于进程 crash、主机掉电或其他 OpenPLC 版本，也不提供恢复延迟保证。
 
 ## 五、Issue #691 验证状态
 
@@ -207,7 +244,7 @@ Simulator 与 OpenPLC 正常通信
 状态：已完成。
 
 - 实现满足目标数据路径所需的最小 Modbus/TCP 设备行为。
-- 提供确定寄存器数据以及 normal、fault 和 recovery 控制。
+- 提供确定寄存器数据以及 normal、fault、delayed 和 recovery 控制。
 - 使用独立 loopback control channel 同步 simulator 状态。
 - 验证 Docker Runtime 到 Windows host simulator 的通信链路。
 
@@ -218,6 +255,8 @@ Simulator 与 OpenPLC 正常通信
 - 由测试控制器编排正常、故障、观测和恢复步骤。
 - 使用真实 FC03 验证远端通信中断。
 - 使用 FC04 持续观察 OpenPLC IEC 数据状态。
+- 验证 terminal delayed-response timeout 后的清零与恢复。
+- 验证当前 Runtime 容器 restart 后的 API、PLC、插件、Modbus 和数据链路恢复。
 - 使用 bounded polling、timeout 和 cleanup 保证测试可控。
 
 ### Stage 5：Issue #691 复现与 Regression Test
@@ -245,7 +284,8 @@ Simulator 与 OpenPLC 正常通信
 - Remote Device 配置和 `set-to-zero` error handling；
 - `%IW0` 作为 Remote Device IEC observation variable；
 - FC03 remote read 与 FC04 observation data path；
-- Python Modbus Device Simulator 的受控 fault/recovery 接口；
+- Python Modbus Device Simulator 的受控 normal/fault/delayed/recovery 接口；
+- 当前 Runtime 容器 restart recovery 路径；
 - OpenPLC Runtime v4.1.9 historical candidate 验证环境；
 - OpenPLC Runtime v4.2.2 current regression baseline；
 - Runtime API、Runtime 日志和 Modbus observation 的证据用途。
