@@ -57,42 +57,11 @@
 - [Issue #691 Validation Report](docs/issue_691_validation.md)
 - [Project Roadmap](docs/roadmap.md)
 
-## Remote Device Validation Architecture
+## System Architecture
 
-当前端到端测试拓扑：
+![OpenPLC Validation Lab v1.1 system architecture](docs/assets/system_architecture.png)
 
-```mermaid
-flowchart TB
-    Suite["Python / pytest Validation Suite"]
-
-    subgraph Runtime["OpenPLC Runtime v4.2.2"]
-        API["Runtime API :8443"]
-        Master["Modbus Master"]
-        IEC["PLC / IEC %IW0"]
-        Slave["Modbus Slave :5020"]
-        Master -->|"%IW0"| IEC
-        IEC -->|"Input Register 0"| Slave
-    end
-
-    subgraph Simulator["Controlled Remote Device Simulator"]
-        Remote["Modbus/TCP :15020"]
-        HR0["HR0=1234"]
-        Control["Control :15021"]
-        HR0 --> Remote
-    end
-
-    Suite -->|"Runtime API"| API
-    Suite -->|"FC04 read"| Slave
-    Slave -->|"FC04 response"| Suite
-    Suite -->|"fault / delay"| Control
-    Master -->|"FC03"| Remote
-    Remote -->|"HR0=1234"| Master
-```
-
-- Runtime API：`127.0.0.1:8443`
-- FC04 observation：`127.0.0.1:5020`
-- simulator Modbus：host port `15020`
-- simulator control：`127.0.0.1:15021`
+Detailed protocol and fault paths are documented in [docs/test_architecture.md](docs/test_architecture.md).
 
 模拟器控制接口只绑定本机 loopback，支持：
 
